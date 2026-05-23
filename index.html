@@ -1,0 +1,747 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Misión Marte - Proyectos Blender</title>
+    <style>
+        /* --- ESTILOS GENERALES --- */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: #010103;
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+            cursor: pointer;
+        }
+
+        #space-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        /* Mira/Círculo interactivo de zona de aterrizaje */
+        .cursor-hint {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 3;
+            pointer-events: none;
+            border: 2px dashed rgba(255, 85, 51, 0.5);
+            border-radius: 50%;
+            width: 120px;
+            height: 120px;
+            opacity: 0;
+            transition: opacity 1.5s ease, border-color 0.3s ease, border-style 0.3s ease;
+            animation: radar 2.5s infinite linear;
+        }
+
+        /* Transición de carga atmosférica (Efecto entrada en calor Marte) */
+        .fade-out-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #9c311a; /* Rojo marciano para unificar la pantalla al aterrizar */
+            z-index: 10;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.8s ease-in;
+        }
+
+        /* Animación de radar base para la mira */
+        @keyframes radar {
+            0% {
+                transform: translate(-50%, -50%) scale(0.85);
+                opacity: 0;
+            }
+            50% {
+                opacity: 0.6;
+            }
+            100% {
+                transform: translate(-50%, -50%) scale(1.2);
+                opacity: 0;
+            }
+        }
+    </style>
+    <!-- Incluimos Three.js desde un CDN seguro -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+    <!-- Canvas de renderizado 3D -->
+    <canvas id="space-canvas"></canvas>
+    
+    <!-- Mira interactiva de designación de aterrizaje -->
+    <div id="planet-hint" class="cursor-hint"></div>
+
+    <!-- Capa de transición a rojo atmósfera al hacer clic -->
+    <div id="transition-overlay" class="fade-out-overlay"></div>
+
+    <script>
+        // --- INICIALIZACIÓN DE LA ESCENA ---
+        const scene = new THREE.Scene();
+        // Niebla espacial oscura para dar profundidad al viaje espacial
+        scene.fog = new THREE.FogExp2(0x010103, 0.008);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('space-canvas'), antialias: true });
+        
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.4;
+
+        // --- SISTEMA DE ESTRELLAS DE FONDO EXTRA BRILLANTES ---
+        const starsGeometry = new THREE.BufferGeometry();
+        const starsCount = 2000;
+        const starPositions = new Float32Array(starsCount * 3);
+        const starColors = new Float32Array(starsCount * 3);
+
+        for (let i = 0; i < starsCount * 3; i += 3) {
+            const u = Math.random();
+            const v = Math.random();
+            const theta = u * 2.0 * Math.PI;
+            const phi = Math.acos(2.0 * v - 1.0);
+            const r = 100 + Math.random() * 140;
+
+            starPositions[i] = r * Math.sin(phi) * Math.cos(theta);
+            starPositions[i+1] = r * Math.sin(phi) * Math.sin(theta);
+            starPositions[i+2] = r * Math.cos(phi);
+
+            // Colores muy vibrantes con destellos
+            const rand = Math.random();
+            if (rand > 0.8) {
+                starColors[i] = 0.85;   // Azuladas brillantes
+                starColors[i+1] = 0.95;
+                starColors[i+2] = 1.0;
+            } else if (rand > 0.6) {
+                starColors[i] = 1.0;    // Doradas brillantes
+                starColors[i+1] = 0.95;
+                starColors[i+2] = 0.8;
+            } else {
+                starColors[i] = 1.0;    // Blanco puro
+                starColors[i+1] = 1.0;
+                starColors[i+2] = 1.0;
+            }
+        }
+
+        starsGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+        starsGeometry.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
+
+        const starsMaterial = new THREE.PointsMaterial({
+            size: 0.36,
+            sizeAttenuation: true,
+            transparent: true,
+            opacity: 1.0,
+            vertexColors: true
+        });
+        const starField = new THREE.Points(starsGeometry, starsMaterial);
+        scene.add(starField);
+
+
+        // --- CREACIÓN DE PLANETAS DE FONDO ENCUADRADOS ---
+
+        const createBluePlanetTexture = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#0a2e6b';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#4fa4de';
+            for (let i = 0; i < 15; i++) {
+                ctx.beginPath();
+                ctx.arc(Math.random() * canvas.width, Math.random() * canvas.height, 10 + Math.random() * 20, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+            for (let i = 0; i < 8; i++) {
+                ctx.beginPath();
+                ctx.arc(Math.random() * canvas.width, Math.random() * canvas.height, 15 + Math.random() * 25, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            return new THREE.CanvasTexture(canvas);
+        };
+
+        const createGasGiantTexture = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#c49564';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            for (let i = 0; i < canvas.height; i += 6) {
+                ctx.fillStyle = i % 12 === 0 ? '#8a562d' : '#edd2b1';
+                ctx.fillRect(0, i + Math.random() * 2, canvas.width, 3 + Math.random() * 4);
+            }
+            return new THREE.CanvasTexture(canvas);
+        };
+
+        // Planeta Azul - En la esquina superior derecha respecto a Marte (Fijado y Visible)
+        const bluePlanetGeometry = new THREE.SphereGeometry(0.28, 32, 32); 
+        const bluePlanetMaterial = new THREE.MeshStandardMaterial({
+            map: createBluePlanetTexture(),
+            roughness: 0.5,
+            metalness: 0.2,
+            emissive: new THREE.Color('#104eb0'),
+            emissiveIntensity: 1.6
+        });
+        const bluePlanet = new THREE.Mesh(bluePlanetGeometry, bluePlanetMaterial);
+        bluePlanet.position.set(5.5, 3.5, -8); 
+        scene.add(bluePlanet);
+
+        // Gigante Gaseoso - En la esquina inferior izquierda respecto a Marte (Mucho más lejano)
+        const gasPlanetGeometry = new THREE.SphereGeometry(0.18, 32, 32); // Reducido para simular lejanía extrema
+        const gasPlanetMaterial = new THREE.MeshStandardMaterial({
+            map: createGasGiantTexture(),
+            roughness: 0.6,
+            metalness: 0.1,
+            emissive: new THREE.Color('#66411a'),
+            emissiveIntensity: 1.8 // Ligeramente más luminoso para que resalte al fondo
+        });
+        const gasPlanet = new THREE.Mesh(gasPlanetGeometry, gasPlanetMaterial);
+        gasPlanet.position.set(-18.0, -9.0, -45); // Empujado muy atrás en el eje Z para dar sensación de lejanía infinita
+        scene.add(gasPlanet);
+
+
+        // --- CREACIÓN DE MARTE (SUPERFICIE PERFECTAMENTE SEAMLESS) ---
+        const planetGeometry = new THREE.SphereGeometry(2.2, 64, 64);
+        
+        const createSeamlessMarsTexture = () => {
+            const canvas = document.createElement('canvas');
+            const width = 1024;
+            const height = 512;
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            
+            ctx.fillStyle = '#9c311a';
+            ctx.fillRect(0, 0, width, height);
+
+            const colors = ['#b83d1d', '#7d2310', '#c25330', '#631d0e', '#8a2b16', '#a3361c'];
+
+            const drawSeamlessDetail = (x, y, r) => {
+                const drawCircle = (cx) => {
+                    const grad = ctx.createRadialGradient(cx, y, 0, cx, y, r);
+                    grad.addColorStop(0, colors[Math.floor(Math.random() * colors.length)]);
+                    grad.addColorStop(0.5, 'rgba(156, 49, 26, 0.4)');
+                    grad.addColorStop(1, 'transparent');
+                    ctx.fillStyle = grad;
+                    ctx.beginPath();
+                    ctx.arc(cx, y, r, 0, Math.PI * 2);
+                    ctx.fill();
+                };
+
+                drawCircle(x);
+
+                if (x - r < 0) {
+                    drawCircle(x + width);
+                }
+                if (x + r > width) {
+                    drawCircle(x - width);
+                }
+            };
+
+            for (let i = 0; i < 400; i++) {
+                const x = Math.random() * width;
+                const y = Math.random() * height;
+                const r = 25 + Math.random() * 75;
+                drawSeamlessDetail(x, y, r);
+            }
+
+            // [MÁSCARA HORIZONTAL ANTICOSTURA]: Difuminamos los extremos de la textura para que coincidan 100% al unirse
+            const edgeGrad = ctx.createLinearGradient(0, 0, width, 0);
+            edgeGrad.addColorStop(0, '#9c311a');
+            edgeGrad.addColorStop(0.04, 'transparent');
+            edgeGrad.addColorStop(0.96, 'transparent');
+            edgeGrad.addColorStop(1, '#9c311a');
+            ctx.save();
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.fillStyle = edgeGrad;
+            ctx.fillRect(0, 0, width, height);
+            ctx.restore();
+
+            // Casquete polar norte degradado
+            const polarGrad = ctx.createLinearGradient(0, 0, 0, 80);
+            polarGrad.addColorStop(0, 'rgba(240, 245, 255, 0.85)');
+            polarGrad.addColorStop(1, 'transparent');
+            ctx.fillStyle = polarGrad;
+            ctx.fillRect(0, 0, width, 80);
+
+            // Casquete polar sur degradado
+            const polarSouthGrad = ctx.createLinearGradient(0, height, 0, height - 50);
+            polarSouthGrad.addColorStop(0, 'rgba(235, 240, 255, 0.7)');
+            polarSouthGrad.addColorStop(1, 'transparent');
+            ctx.fillStyle = polarSouthGrad;
+            ctx.fillRect(0, height - 50, width, 50);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.ClampToEdgeWrapping;
+            
+            return texture;
+        };
+
+        const marsTexture = createSeamlessMarsTexture();
+
+        const planetMaterial = new THREE.MeshStandardMaterial({
+            map: marsTexture,
+            roughness: 0.85,
+            metalness: 0.05,
+            bumpScale: 0.08
+        });
+
+        const mars = new THREE.Mesh(planetGeometry, planetMaterial);
+        scene.add(mars);
+
+
+        // --- CAPA DE TORMENTAS DE POLVO ATMOSFÉRICAS ---
+        const stormGeometry = new THREE.SphereGeometry(2.215, 64, 64);
+
+        const createSeamlessStormTexture = () => {
+            const canvas = document.createElement('canvas');
+            const width = 1024;
+            const height = 512;
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            
+            ctx.clearRect(0, 0, width, height);
+
+            const drawStormBand = (x, y, rx, ry, opacity) => {
+                const drawEllipse = (cx) => {
+                    const grad = ctx.createRadialGradient(cx, y, 0, cx, y, rx);
+                    grad.addColorStop(0, `rgba(235, 150, 90, ${opacity})`);
+                    grad.addColorStop(0.5, `rgba(210, 110, 60, ${opacity * 0.5})`);
+                    grad.addColorStop(1, 'transparent');
+                    
+                    ctx.fillStyle = grad;
+                    ctx.beginPath();
+                    ctx.save();
+                    ctx.translate(cx, y);
+                    ctx.scale(1, ry / rx);
+                    ctx.arc(0, 0, rx, 0, Math.PI * 2);
+                    ctx.restore();
+                    ctx.fill();
+                };
+
+                drawEllipse(x);
+                if (x - rx < 0) drawEllipse(x + width);
+                if (x + rx > width) drawEllipse(x - width);
+            };
+
+            for (let i = 0; i < 45; i++) {
+                const x = Math.random() * width;
+                const y = 100 + Math.random() * 312;
+                const rx = 80 + Math.random() * 150;
+                const ry = 25 + Math.random() * 50;
+                const opacity = 0.2 + Math.random() * 0.35;
+                drawStormBand(x, y, rx, ry, opacity);
+            }
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.ClampToEdgeWrapping;
+            return texture;
+        };
+
+        const stormTexture = createSeamlessStormTexture();
+        const stormMaterial = new THREE.MeshStandardMaterial({
+            map: stormTexture,
+            transparent: true,
+            opacity: 0.85,
+            roughness: 0.6,
+            metalness: 0.1,
+            blending: THREE.NormalBlending
+        });
+
+        const stormLayer = new THREE.Mesh(stormGeometry, stormMaterial);
+        scene.add(stormLayer);
+
+
+        // --- ATMÓSFERA EXTERIOR ---
+        const atmosphereGeometry = new THREE.SphereGeometry(2.26, 32, 32);
+        const atmosphereMaterial = new THREE.MeshBasicMaterial({
+            color: 0xff3a0c,
+            transparent: true,
+            opacity: 0.18,
+            side: THREE.BackSide
+        });
+        const atmosphere = new THREE.Mesh(atmosphereGeometry, atmosphereMaterial);
+        scene.add(atmosphere);
+
+        // --- CONFIGURACIÓN DE ILUMINACIÓN ESPACIAL ---
+        const ambientLight = new THREE.AmbientLight(0x220e0a, 0.85);
+        scene.add(ambientLight);
+
+        const sunLight = new THREE.DirectionalLight(0xfff5ea, 2.5);
+        sunLight.position.set(12, 4, 15);
+        scene.add(sunLight);
+
+        const fillLight = new THREE.DirectionalLight(0x2244aa, 0.45);
+        fillLight.position.set(-15, -5, -10);
+        scene.add(fillLight);
+
+        // --- SISTEMA DE VIAJE Y CONTROL DE ESTADOS ---
+        camera.position.set(0, 0, 85); 
+
+        let introFinished = false;
+        let isTransitioning = false;
+        let warpSpeed = 0.01; 
+
+        const targetZ = 5.2; 
+        const speedFactor = 0.007; 
+
+        const mouse = new THREE.Vector2();
+        const targetRotation = new THREE.Vector2();
+        const raycaster = new THREE.Raycaster();
+
+        // --- LÓGICA DE COORDENADAS PARA LA MIRA INTERACTIVA ---
+        const hintEl = document.getElementById('planet-hint');
+        
+        let hintX = window.innerWidth / 2;
+        let hintY = window.innerHeight / 2;
+        let targetHintX = window.innerWidth / 2;
+        let targetHintY = window.innerHeight / 2;
+        let isHoveringPlanet = false;
+
+
+        // --- SINTETIZADOR DE MÚSICA Y AMBIENTE DE NAVE ESPACIAL (WEB AUDIO API) ---
+        let audioCtx = null;
+        let masterGain = null;
+
+        function startSpaceMusic() {
+            if (audioCtx) return; 
+
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            masterGain = audioCtx.createGain();
+            masterGain.gain.setValueAtTime(0.0, audioCtx.currentTime);
+            masterGain.gain.linearRampToValueAtTime(0.25, audioCtx.currentTime + 2.5);
+            masterGain.connect(audioCtx.destination);
+
+            // 1. Zumbido de cabina / Motores auxiliares (Spaceship Rumble & Hum) - GRAVES REBAJADOS
+            const engineOsc = audioCtx.createOscillator();
+            const cabinOsc = audioCtx.createOscillator();
+            const cabinFilter = audioCtx.createBiquadFilter();
+
+            engineOsc.type = 'triangle';
+            engineOsc.frequency.setValueAtTime(38.0, audioCtx.currentTime); // 38Hz (vibración sutil)
+
+            cabinOsc.type = 'sawtooth';
+            cabinOsc.frequency.setValueAtTime(80.0, audioCtx.currentTime); // Frecuencia de base atenuada
+
+            cabinFilter.type = 'lowpass';
+            cabinFilter.frequency.setValueAtTime(95, audioCtx.currentTime); 
+
+            // Nodo de ganancia de motores - Calibrado súper sutil para que no sea intrusivo
+            const engineGain = audioCtx.createGain();
+            engineGain.gain.setValueAtTime(0.06, audioCtx.currentTime); // Rebajado a la mitad para evitar excesos graves
+
+            engineOsc.connect(cabinFilter);
+            cabinOsc.connect(cabinFilter);
+            cabinFilter.connect(engineGain);
+            engineGain.connect(masterGain);
+
+            engineOsc.start();
+            cabinOsc.start();
+
+            // 2. Ruido blanco filtrado (Flujo de aire de soporte vital) - CALIBRADO ALTAMENTE SUTIL (0.08)
+            const bufferSize = audioCtx.sampleRate * 2;
+            const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+            const output = noiseBuffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+                output[i] = Math.random() * 2 - 1;
+            }
+            const whiteNoise = audioCtx.createBufferSource();
+            whiteNoise.buffer = noiseBuffer;
+            whiteNoise.loop = true;
+
+            const airFilter = audioCtx.createBiquadFilter();
+            airFilter.type = 'bandpass';
+            airFilter.frequency.setValueAtTime(260, audioCtx.currentTime);
+            airFilter.Q.setValueAtTime(1.1, audioCtx.currentTime);
+
+            const airGain = audioCtx.createGain();
+            // Ruido de fondo sutil y de baja intensidad (0.08)
+            airGain.gain.setValueAtTime(0.08, audioCtx.currentTime); 
+
+            whiteNoise.connect(airFilter);
+            airFilter.connect(airGain);
+            airGain.connect(masterGain);
+            whiteNoise.start();
+
+            // 3. Drone cósmico de fondo profundo - ATENUADO EN GRAVES
+            const baseDrone = audioCtx.createOscillator();
+            const droneFilter = audioCtx.createBiquadFilter();
+
+            baseDrone.type = 'sine';
+            baseDrone.frequency.setValueAtTime(110.0, audioCtx.currentTime); 
+
+            droneFilter.type = 'lowpass';
+            droneFilter.frequency.setValueAtTime(130, audioCtx.currentTime);
+
+            const droneGain = audioCtx.createGain();
+            droneGain.gain.setValueAtTime(0.12, audioCtx.currentTime); // Equilibrio de fondo impecable
+
+            // Modulación de ciclo muy lento (LFO)
+            const lfo = audioCtx.createOscillator();
+            const lfoGain = audioCtx.createGain();
+            lfo.frequency.value = 0.05; 
+            lfoGain.gain.value = 50;
+
+            lfo.connect(lfoGain);
+            lfoGain.connect(droneFilter.frequency);
+
+            baseDrone.connect(droneFilter);
+            droneFilter.connect(droneGain);
+            droneGain.connect(masterGain);
+
+            baseDrone.start();
+            lfo.start();
+
+            // 4. Pitidos de consola de soporte de telemetría (Spaceship Console)
+            function playConsoleTelemetry() {
+                if (isTransitioning) return; 
+
+                const pingOsc = audioCtx.createOscillator();
+                const pingGain = audioCtx.createGain();
+
+                const isClick = Math.random() > 0.6;
+                pingOsc.type = 'sine';
+                
+                if (isClick) {
+                    pingOsc.frequency.setValueAtTime(135, audioCtx.currentTime);
+                    pingGain.gain.setValueAtTime(0.0, audioCtx.currentTime);
+                    pingGain.gain.linearRampToValueAtTime(0.06, audioCtx.currentTime + 0.01); 
+                    pingGain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.08);
+                } else {
+                    const freqs = [1800, 2200, 2500, 2900, 3200];
+                    const randomFreq = freqs[Math.floor(Math.random() * freqs.length)];
+                    pingOsc.frequency.setValueAtTime(randomFreq, audioCtx.currentTime);
+                    
+                    pingGain.gain.setValueAtTime(0.0, audioCtx.currentTime);
+                    pingGain.gain.linearRampToValueAtTime(0.02, audioCtx.currentTime + 0.02); 
+                    pingGain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.4);
+                }
+
+                pingOsc.connect(pingGain);
+                pingGain.connect(masterGain);
+
+                pingOsc.start();
+                pingOsc.stop(audioCtx.currentTime + 0.5);
+            }
+
+            // Intervalo activo de telemetría (cada 2.2 segundos)
+            setInterval(() => {
+                const repetitions = Math.floor(Math.random() * 4) + 1; 
+                for (let i = 0; i < repetitions; i++) {
+                    setTimeout(playConsoleTelemetry, i * 140);
+                }
+            }, 2200);
+
+            // 5. Destellos armónicos de nebulosas lejanas (Ecos espaciales)
+            const notes = [440, 493.88, 554.37, 659.25, 739.99, 880]; 
+
+            function playSpaceSparkle() {
+                if (isTransitioning) return; 
+
+                const sparkleOsc = audioCtx.createOscillator();
+                const sparkleGain = audioCtx.createGain();
+                const sparkleFilter = audioCtx.createBiquadFilter();
+
+                sparkleOsc.type = 'sine';
+                const randomNote = notes[Math.floor(Math.random() * notes.length)] * 2;
+                sparkleOsc.frequency.setValueAtTime(randomNote, audioCtx.currentTime);
+
+                sparkleFilter.type = 'bandpass';
+                sparkleFilter.frequency.setValueAtTime(1200, audioCtx.currentTime);
+
+                sparkleGain.gain.setValueAtTime(0.0, audioCtx.currentTime);
+                sparkleGain.gain.linearRampToValueAtTime(0.03, audioCtx.currentTime + 1.5); 
+                sparkleGain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 6.0); 
+
+                sparkleOsc.connect(sparkleFilter);
+                sparkleFilter.connect(sparkleGain);
+                sparkleGain.connect(masterGain);
+
+                sparkleOsc.start();
+                sparkleOsc.stop(audioCtx.currentTime + 6.1);
+            }
+
+            setInterval(playSpaceSparkle, 4200);
+        }
+
+        // --- BUCLE DE ANIMACIÓN (LOOP) ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (!isTransitioning) {
+                // Rotaciones autónomas normales de los astros
+                mars.rotation.y += 0.0016;
+                stormLayer.rotation.y -= 0.0028;
+                stormLayer.rotation.x = Math.sin(Date.now() * 0.0001) * 0.03;
+
+                atmosphere.rotation.y += 0.0016;
+                
+                bluePlanet.rotation.y += 0.0012;
+                gasPlanet.rotation.y -= 0.0009;
+                starField.rotation.y += 0.00008;
+
+                if (!introFinished) {
+                    // ACERCAMIENTO PAUSADO CINEMÁTICO
+                    camera.position.z = THREE.MathUtils.lerp(camera.position.z, targetZ, speedFactor);
+                    mars.rotation.y += (targetZ / camera.position.z) * 0.003;
+
+                    if (Math.abs(camera.position.z - targetZ) < 0.05) {
+                        camera.position.z = targetZ;
+                        introFinished = true;
+                        
+                        // Mostramos la mira circular suavemente al frenar
+                        hintEl.style.opacity = '1';
+                    }
+                } else {
+                    // REACCIÓN AL CURSOR DEL RATÓN (Inclinación de Marte)
+                    mars.rotation.x = THREE.MathUtils.lerp(mars.rotation.x, targetRotation.y * 0.12, 0.05);
+                    stormLayer.rotation.x = THREE.MathUtils.lerp(stormLayer.rotation.x, targetRotation.y * 0.12, 0.05);
+
+                    // CONTROL INTERACTIVO DE LA MIRA DE ATERRIZAJE
+                    raycaster.setFromCamera(mouse, camera);
+                    const intersects = raycaster.intersectObjects([mars, stormLayer]);
+
+                    isHoveringPlanet = intersects.length > 0;
+
+                    if (isHoveringPlanet) {
+                        hintX = THREE.MathUtils.lerp(hintX, targetHintX, 0.15);
+                        hintY = THREE.MathUtils.lerp(hintY, targetHintY, 0.15);
+                        hintEl.style.borderColor = 'rgba(255, 120, 50, 0.85)';
+                        hintEl.style.borderStyle = 'solid'; 
+                    } else {
+                        hintX = THREE.MathUtils.lerp(hintX, window.innerWidth / 2, 0.15);
+                        hintY = THREE.MathUtils.lerp(hintY, window.innerHeight / 2, 0.15);
+                        hintEl.style.borderColor = 'rgba(255, 85, 51, 0.5)';
+                        hintEl.style.borderStyle = 'dashed'; 
+                    }
+
+                    hintEl.style.left = `${hintX}px`;
+                    hintEl.style.top = `${hintY}px`;
+                }
+            } else {
+                // --- EFECTO VELOCIDAD DE LA LUZ CON ENTRADA ATMOSFÉRICA ---
+                warpSpeed += 0.06; 
+
+                // 1. Distorsión de lente (Efecto túnel warp)
+                camera.fov = THREE.MathUtils.lerp(camera.fov, 140, 0.08);
+                camera.updateProjectionMatrix();
+
+                // 2. Desplazamiento de cámara limitando la inmersión justo al ras del planeta (evita traspasarlo)
+                camera.position.z = Math.max(2.22, camera.position.z - warpSpeed);
+
+                // 3. Incremento volumétrico masivo de niebla roja de Marte
+                scene.fog.color.setHex(0x9c311a);
+                scene.fog.density = THREE.MathUtils.lerp(scene.fog.density, 1.6, 0.08);
+
+                // 4. Giro acelerado de fricción térmica
+                mars.rotation.y += 0.15;
+                stormLayer.rotation.y -= 0.18;
+
+                // 5. Estiramiento dinámico de las estrellas
+                const positions = starField.geometry.attributes.position.array;
+                for (let i = 2; i < positions.length; i += 3) {
+                    positions[i] += warpSpeed * 6.0; 
+                    if (positions[i] > 80) {
+                        positions[i] = -150; 
+                    }
+                }
+                starField.geometry.attributes.position.needsUpdate = true;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // --- EVENTOS E INTERACTIVIDAD ---
+
+        window.addEventListener('mousemove', (event) => {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            targetRotation.x = mouse.x;
+            targetRotation.y = -mouse.y;
+
+            targetHintX = event.clientX;
+            targetHintY = event.clientY;
+        });
+
+        // Intentar arrancar la música en cuanto el cursor se mueva sobre el documento para iniciar de inmediato
+        window.addEventListener('mouseover', () => {
+            if (!audioCtx) {
+                startSpaceMusic();
+            } else if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        });
+
+        // Evento click unificado: inicia la música de fondo e interactúa con el planeta
+        window.addEventListener('click', (event) => {
+            // Inicializar o reanudar el contexto de audio en la primera interacción de clic
+            if (!audioCtx) {
+                startSpaceMusic();
+            } else if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+
+            if (!introFinished || isTransitioning) return;
+
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects([mars, stormLayer]);
+
+            if (intersects.length > 0) {
+                isTransitioning = true;
+
+                // Apagamos la mira telescópica
+                hintEl.style.opacity = '0';
+
+                // Desvanecimiento suave de volumen de la música sincronizado con la aceleración (0.8s)
+                if (masterGain) {
+                    masterGain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.8);
+                }
+
+                // Transición cromática de atmósfera de Marte
+                document.getElementById('transition-overlay').style.opacity = '1';
+
+                setTimeout(() => {
+                    window.location.href = "galeria.html";
+                }, 1000); 
+            }
+        });
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+
+            if (!isHoveringPlanet) {
+                targetHintX = window.innerWidth / 2;
+                targetHintY = window.innerHeight / 2;
+            }
+        });
+    </script>
+</body>
+</ht
