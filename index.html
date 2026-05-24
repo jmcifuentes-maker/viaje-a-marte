@@ -1,10 +1,13 @@
-
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Misión Marte - Proyectos Blender</title>
+    <!-- Importamos las fuentes para el visor HUD -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;700;900&family=Nunito:wght@300;400;600;700&display=swap" rel="stylesheet">
     <style>
         /* --- ESTILOS GENERALES --- */
         * {
@@ -28,6 +31,96 @@
             width: 100%;
             height: 100%;
             z-index: 1;
+        }
+
+        /* --- MARCO DE INTERFAZ HUD (PANTALLA DE CABINA) --- */
+        .hud-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+            pointer-events: none;
+            border: 1px solid rgba(255, 85, 51, 0.15);
+            box-shadow: inset 0 0 100px rgba(0, 0, 0, 0.8), inset 0 0 40px rgba(255, 85, 51, 0.05);
+            box-sizing: border-box;
+            transition: opacity 0.8s ease;
+        }
+
+        /* Rejilla de píxeles digitales sutiles */
+        .hud-scanline-grid {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: 
+                linear-gradient(rgba(255, 85, 51, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 85, 51, 0.03) 1px, transparent 1px);
+            background-size: 30px 30px;
+            background-position: center;
+        }
+
+        /* Indicador de Grabación (REC) parpadeante superior derecho */
+        .hud-rec-indicator {
+            position: absolute;
+            top: 30px;
+            right: 30px;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 10px;
+            color: #ff5533;
+            letter-spacing: 2px;
+            font-weight: 700;
+            text-shadow: 0 0 8px rgba(255, 85, 51, 0.6);
+            animation: blink 1.5s infinite;
+        }
+
+        /* Datos de telemetría superior izquierda con la marca ESDA */
+        .hud-system-status {
+            position: absolute;
+            top: 30px;
+            left: 30px;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 9px;
+            color: rgba(255, 85, 51, 0.6);
+            letter-spacing: 1.5px;
+            font-weight: 500;
+            line-height: 1.6;
+        }
+
+        /* Leyenda de aterrizaje en la parte inferior */
+        .hud-landing-warning {
+            position: absolute;
+            bottom: 35px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-family: 'Montserrat', sans-serif;
+            font-size: 11px;
+            color: #ffffff;
+            letter-spacing: 4px;
+            font-weight: 500;
+            text-transform: uppercase;
+            text-align: center;
+            opacity: 0.8;
+            text-shadow: 0 0 10px rgba(255, 85, 51, 0.4);
+        }
+
+        /* Esquinas HUD estilizadas */
+        .hud-corner {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            border-color: rgba(255, 85, 51, 0.4);
+            border-style: solid;
+        }
+        .top-left { top: 15px; left: 15px; border-width: 2px 0 0 2px; }
+        .top-right { top: 15px; right: 15px; border-width: 2px 2px 0 0; }
+        .bottom-left { bottom: 15px; left: 15px; border-width: 0 0 2px 2px; }
+        .bottom-right { bottom: 15px; right: 15px; border-width: 0 2px 2px 0; }
+
+        @keyframes blink {
+            50% { opacity: 0; }
         }
 
         /* Mira/Círculo interactivo de zona de aterrizaje */
@@ -80,6 +173,24 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
+
+    <!-- Cabina de Telemetría HUD -->
+    <div class="hud-overlay" id="hud-panel">
+        <div class="hud-scanline-grid"></div>
+        <div class="hud-corner top-left"></div>
+        <div class="hud-corner top-right"></div>
+        <div class="hud-corner bottom-left"></div>
+        <div class="hud-corner bottom-right"></div>
+        
+        <div class="hud-rec-indicator">REC •</div>
+        <div class="hud-system-status">
+            TERM_ID: ESDA_NAV_01<br>
+            CAM_FEED: ACTIVE<br>
+            SYS_LOC: MA_ORBITAL_S1<br>
+            WVP_MATRIX: AUTO_CAL
+        </div>
+        <div class="hud-landing-warning">HAZ CLIC EN EL PLANETA PARA ATERRIZAR</div>
+    </div>
 
     <!-- Canvas de renderizado 3D -->
     <canvas id="space-canvas"></canvas>
@@ -150,6 +261,103 @@
         });
         const starField = new THREE.Points(starsGeometry, starsMaterial);
         scene.add(starField);
+
+
+        // --- SISTEMA DINÁMICO SUTIL DE ESTRELLAS FUGACES Y COMETA ---
+        const maxShootingStars = 4;
+        const shootingStars = [];
+
+        // Geometría y material para las estelas de las estrellas fugaces
+        const shootingStarMaterial = new THREE.LineBasicMaterial({
+            color: 0xffd2b1,
+            transparent: true,
+            opacity: 0,
+            blending: THREE.AdditiveBlending
+        });
+
+        for (let i = 0; i < maxShootingStars; i++) {
+            const lineGeom = new THREE.BufferGeometry();
+            const pts = new Float32Array(6); // 2 puntos de trayectoria
+            lineGeom.setAttribute('position', new THREE.BufferAttribute(pts, 3));
+            
+            const line = new THREE.Line(lineGeom, shootingStarMaterial.clone());
+            scene.add(line);
+
+            shootingStars.push({
+                mesh: line,
+                active: false,
+                startX: 0, startY: 0, startZ: 0,
+                endX: 0, endY: 0, endZ: 0,
+                progress: 0,
+                speed: 0
+            });
+        }
+
+        function triggerShootingStar(star) {
+            star.startX = (Math.random() - 0.5) * 60;
+            star.startY = 15 + Math.random() * 20;
+            star.startZ = -15 - Math.random() * 30;
+
+            // Dirección inclinada descendente rápida y elegante
+            star.endX = star.startX - 15 - Math.random() * 15;
+            star.endY = star.startY - 15 - Math.random() * 15;
+            star.endZ = star.startZ + (Math.random() - 0.5) * 5;
+
+            star.progress = 0;
+            star.speed = 0.025 + Math.random() * 0.035;
+            star.active = true;
+            star.mesh.material.opacity = 0.8;
+            star.mesh.material.color.setHex(Math.random() > 0.5 ? 0xfff5ea : 0xff7744);
+        }
+
+        // --- SISTEMA DEL COMETA MAJESTUOSO SUTIL ---
+        const cometGeometry = new THREE.BufferGeometry();
+        const cometPoints = new Float32Array(15 * 3); // Estela degradada de 15 nodos
+        cometGeometry.setAttribute('position', new THREE.BufferAttribute(cometPoints, 3));
+
+        const cometMaterial = new THREE.LineBasicMaterial({
+            color: 0xffaa77,
+            transparent: true,
+            opacity: 0,
+            blending: THREE.AdditiveBlending,
+            linewidth: 2
+        });
+
+        const cometLine = new THREE.Line(cometGeometry, cometMaterial);
+        scene.add(cometLine);
+
+        const cometData = {
+            active: false,
+            x: 0, y: 0, z: 0,
+            dx: -0.05, dy: -0.02, dz: 0.01, // Órbita lenta, casi inmóvil
+            trail: Array(15).fill().map(() => new THREE.Vector3())
+        };
+
+        function triggerComet() {
+            cometData.x = 45;
+            cometData.y = 20;
+            cometData.z = -15;
+            cometData.active = true;
+            cometMaterial.opacity = 0.45; // Destello de fondo muy discreto
+
+            for(let i = 0; i < 15; i++) {
+                cometData.trail[i].set(cometData.x, cometData.y, cometData.z);
+            }
+        }
+
+        // Intervalo aleatorio para estrellas fugaces y cometas
+        setInterval(() => {
+            const inactiveStar = shootingStars.find(s => !s.active);
+            if (inactiveStar && Math.random() > 0.4) {
+                triggerShootingStar(inactiveStar);
+            }
+        }, 1500);
+
+        setInterval(() => {
+            if (!cometData.active && Math.random() > 0.5) {
+                triggerComet();
+            }
+        }, 11000);
 
 
         // --- CREACIÓN DE PLANETAS DE FONDO ENCUADRADOS ---
@@ -411,6 +619,7 @@
 
         // --- LÓGICA DE COORDENADAS PARA LA MIRA INTERACTIVA ---
         const hintEl = document.getElementById('planet-hint');
+        const hudPanel = document.getElementById('hud-panel');
         
         let hintX = window.innerWidth / 2;
         let hintY = window.innerHeight / 2;
@@ -600,6 +809,62 @@
                 gasPlanet.rotation.y -= 0.0009;
                 starField.rotation.y += 0.00008;
 
+                // Animación de estrellas fugaces activas
+                shootingStars.forEach(s => {
+                    if (s.active) {
+                        s.progress += s.speed;
+                        
+                        // Actualizar coordenadas de línea de estela
+                        const x = THREE.MathUtils.lerp(s.startX, s.endX, s.progress);
+                        const y = THREE.MathUtils.lerp(s.startY, s.endY, s.progress);
+                        const z = THREE.MathUtils.lerp(s.startZ, s.endZ, s.progress);
+
+                        const prevProgress = Math.max(0, s.progress - 0.08);
+                        const px = THREE.MathUtils.lerp(s.startX, s.endX, prevProgress);
+                        const py = THREE.MathUtils.lerp(s.startY, s.endY, prevProgress);
+                        const pz = THREE.MathUtils.lerp(s.startZ, s.endZ, prevProgress);
+
+                        const positions = s.mesh.geometry.attributes.position.array;
+                        positions[0] = px; positions[1] = py; positions[2] = pz;
+                        positions[3] = x;  positions[4] = y;  positions[5] = z;
+                        s.mesh.geometry.attributes.position.needsUpdate = true;
+
+                        // Desvanecimiento al final del viaje
+                        if (s.progress >= 1.0) {
+                            s.mesh.material.opacity -= 0.08;
+                            if (s.mesh.material.opacity <= 0) {
+                                s.active = false;
+                            }
+                        }
+                    }
+                });
+
+                // Animación de cometa sutil
+                if (cometData.active) {
+                    cometData.x += cometData.dx;
+                    cometData.y += cometData.dy;
+                    cometData.z += cometData.dz;
+
+                    // Desplazar estela
+                    cometData.trail.unshift(new THREE.Vector3(cometData.x, cometData.y, cometData.z));
+                    cometData.trail.pop();
+
+                    // Re-renderizado de nodos
+                    const positions = cometLine.geometry.attributes.position.array;
+                    for(let i = 0; i < 15; i++) {
+                        positions[i*3] = cometData.trail[i].x;
+                        positions[i*3+1] = cometData.trail[i].y;
+                        positions[i*3+2] = cometData.trail[i].z;
+                    }
+                    cometLine.geometry.attributes.position.needsUpdate = true;
+
+                    // Finalización orbital
+                    if (cometData.x < -45) {
+                        cometData.active = false;
+                        cometMaterial.opacity = 0;
+                    }
+                }
+
                 if (!introFinished) {
                     // ACERCAMIENTO PAUSADO CINEMÁTICO
                     camera.position.z = THREE.MathUtils.lerp(camera.position.z, targetZ, speedFactor);
@@ -715,8 +980,9 @@
             if (intersects.length > 0) {
                 isTransitioning = true;
 
-                // Apagamos la mira telescópica
+                // Apagamos la mira telescópica y el panel HUD
                 hintEl.style.opacity = '0';
+                hudPanel.style.opacity = '0';
 
                 // Desvanecimiento suave de volumen de la música sincronizado con la aceleración (0.8s)
                 if (masterGain) {
@@ -744,4 +1010,5 @@
         });
     </script>
 </body>
+</html>
 </ht
