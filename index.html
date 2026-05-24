@@ -266,6 +266,57 @@
         scene.add(starField);
 
 
+        // --- SISTEMA VECTORIAL DE LÍNEAS WARP ---
+        const warpLinesCount = 150;
+        const warpLinesGeometry = new THREE.BufferGeometry();
+        const warpLinePositions = new Float32Array(warpLinesCount * 2 * 3); // 2 puntos por línea
+        const warpLineColors = new Float32Array(warpLinesCount * 2 * 3);
+
+        // Inicializamos los segmentos de las líneas hiperespaciales
+        for (let i = 0; i < warpLinesCount; i++) {
+            const index = i * 6;
+            
+            const angle = Math.random() * Math.PI * 2;
+            const radius = 6 + Math.random() * 25;
+            const x = Math.sin(angle) * radius;
+            const y = Math.cos(angle) * radius;
+            const z = -50 - Math.random() * 100;
+
+            // Punto de inicio del segmento (atrás)
+            warpLinePositions[index] = x;
+            warpLinePositions[index + 1] = y;
+            warpLinePositions[index + 2] = z;
+
+            // Punto final del segmento (adelante)
+            warpLinePositions[index + 3] = x;
+            warpLinePositions[index + 4] = y;
+            warpLinePositions[index + 5] = z + 5;
+
+            // Colores correspondientes a las líneas de plasma
+            const isOrange = Math.random() > 0.4;
+            const r = isOrange ? 1.0 : 0.6;
+            const g = isOrange ? 0.35 : 0.8;
+            const b = isOrange ? 0.15 : 1.0;
+
+            warpLineColors[index] = r; warpLineColors[index+1] = g; warpLineColors[index+2] = b;
+            warpLineColors[index+3] = r; warpLineColors[index+4] = g; warpLineColors[index+5] = b;
+        }
+
+        warpLinesGeometry.setAttribute('position', new THREE.BufferAttribute(warpLinePositions, 3));
+        warpLinesGeometry.setAttribute('color', new THREE.BufferAttribute(warpLineColors, 3));
+
+        const warpLinesMaterial = new THREE.LineBasicMaterial({
+            vertexColors: true,
+            transparent: true,
+            opacity: 0, // Invisibles al inicio
+            blending: THREE.AdditiveBlending,
+            linewidth: 2
+        });
+
+        const warpLinesField = new THREE.LineSegments(warpLinesGeometry, warpLinesMaterial);
+        scene.add(warpLinesField);
+
+
         // --- SISTEMA DINÁMICO SUTIL DE ESTRELLAS FUGACES Y COMETA ---
         const maxShootingStars = 4;
         const shootingStars = [];
@@ -401,7 +452,7 @@
             return new THREE.CanvasTexture(canvas);
         };
 
-        // Planeta Azul
+        // Planeta Azul - En la esquina superior derecha respecto a Marte (Fijado y Visible)
         const bluePlanetGeometry = new THREE.SphereGeometry(0.28, 32, 32); 
         const bluePlanetMaterial = new THREE.MeshStandardMaterial({
             map: createBluePlanetTexture(),
@@ -414,7 +465,7 @@
         bluePlanet.position.set(5.5, 3.5, -8); 
         scene.add(bluePlanet);
 
-        // Gigante Gaseoso
+        // Gigante Gaseoso - En la esquina inferior izquierda respecto a Marte (Mucho más lejano)
         const gasPlanetGeometry = new THREE.SphereGeometry(0.18, 32, 32); 
         const gasPlanetMaterial = new THREE.MeshStandardMaterial({
             map: createGasGiantTexture(),
@@ -428,7 +479,7 @@
         scene.add(gasPlanet);
 
 
-        // --- CREACIÓN DE MARTE (SUPERFICIE SEAMLESS) ---
+        // --- CREACIÓN DE MARTE (SUPERFICIE SEAMLESS VERTICAL ORIGINAL) ---
         const planetGeometry = new THREE.SphereGeometry(2.2, 64, 64);
         
         const createSeamlessMarsTexture = () => {
@@ -445,9 +496,12 @@
             const colors = ['#b83d1d', '#7d2310', '#c25330', '#631d0e', '#8a2b16', '#a3361c'];
 
             const drawSeamlessDetail = (x, y, r) => {
+                // Seleccionamos el color una sola vez por detalle para evitar costuras cromáticas
+                const colorDetail = colors[Math.floor(Math.random() * colors.length)];
+                
                 const drawCircle = (cx) => {
                     const grad = ctx.createRadialGradient(cx, y, 0, cx, y, r);
-                    grad.addColorStop(0, colors[Math.floor(Math.random() * colors.length)]);
+                    grad.addColorStop(0, colorDetail);
                     grad.addColorStop(0.5, 'rgba(156, 49, 26, 0.4)');
                     grad.addColorStop(1, 'transparent');
                     ctx.fillStyle = grad;
@@ -458,6 +512,7 @@
 
                 drawCircle(x);
 
+                // Envoltura horizontal exacta para la textura vertical
                 if (x - r < 0) {
                     drawCircle(x + width);
                 }
@@ -501,7 +556,11 @@
 
             const texture = new THREE.CanvasTexture(canvas);
             texture.wrapS = THREE.RepeatWrapping;
-            texture.wrapT = THREE.ClampToEdgeWrapping;
+            texture.wrapT = THREE.ClampToEdgeWrapping; // Volver al wrap vertical original sin rotar
+            
+            // Desactivamos mipmaps para erradicar cualquier costura de filtrado de WebGL
+            texture.generateMipmaps = false;
+            texture.minFilter = THREE.LinearFilter;
             
             return texture;
         };
@@ -519,7 +578,7 @@
         scene.add(mars);
 
 
-        // --- CAPA DE TORMENTAS DE POLVO ---
+        // --- CAPA DE TORMENTAS DE POLVO (VERTICAL ORIGINAL) ---
         const stormGeometry = new THREE.SphereGeometry(2.215, 64, 64);
 
         const createSeamlessStormTexture = () => {
@@ -566,6 +625,10 @@
             const texture = new THREE.CanvasTexture(canvas);
             texture.wrapS = THREE.RepeatWrapping;
             texture.wrapT = THREE.ClampToEdgeWrapping;
+            
+            texture.generateMipmaps = false;
+            texture.minFilter = THREE.LinearFilter;
+            
             return texture;
         };
 
@@ -633,7 +696,7 @@
         let systemsArmed = false; 
 
 
-        // --- SINTETIZADOR DE MÚSICA Y AMBIENTE DE NAVE ESPACIAL (WEB AUDIO API) ---
+        // --- SINTETIZADOR DE MÚSICA Y AMBIENTE DE NAVE ESPACIAL ---
         let audioCtx = null;
         let masterGain = null;
         let musicStarted = false;
@@ -654,7 +717,7 @@
             masterGain.gain.linearRampToValueAtTime(0.25, ctxAudio.currentTime + 2.5);
             masterGain.connect(ctxAudio.destination);
 
-            // 1. Zumbido de cabina / Motores auxiliares
+            // Zumbido de cabina / Motores auxiliares
             const engineOsc = ctxAudio.createOscillator();
             const cabinOsc = ctxAudio.createOscillator();
             const cabinFilter = ctxAudio.createBiquadFilter();
@@ -679,7 +742,7 @@
             engineOsc.start();
             cabinOsc.start();
 
-            // 2. Ruido blanco filtrado (Flujo de aire)
+            // Ruido blanco filtrado (Flujo de aire)
             const bufferSize = ctxAudio.sampleRate * 2;
             const noiseBuffer = ctxAudio.createBuffer(1, bufferSize, ctxAudio.sampleRate);
             const output = noiseBuffer.getChannelData(0);
@@ -703,7 +766,7 @@
             airGain.connect(masterGain);
             whiteNoise.start();
 
-            // 3. Drone cósmico modulado
+            // Drone cósmico modulado
             const baseDrone = ctxAudio.createOscillator();
             const droneFilter = ctxAudio.createBiquadFilter();
 
@@ -731,7 +794,7 @@
             baseDrone.start();
             lfo.start();
 
-            // 4. Pitidos de consola de soporte de telemetría (Spaceship Console)
+            // Pitidos de consola de soporte de telemetría (Spaceship Console)
             function playConsoleTelemetry() {
                 if (isTransitioning) return; 
 
@@ -770,7 +833,7 @@
                 }
             }, 2200);
 
-            // 5. Destellos armónicos
+            // Destellos armónicos
             const notes = [440, 493.88, 554.37, 659.25, 739.99, 880]; 
 
             function playSpaceSparkle() {
@@ -831,7 +894,7 @@
             requestAnimationFrame(animate);
 
             if (!isTransitioning) {
-                // Rotaciones
+                // Rotaciones normales
                 mars.rotation.y += 0.0016;
                 stormLayer.rotation.y -= 0.0028;
                 stormLayer.rotation.x = Math.sin(Date.now() * 0.0001) * 0.03;
@@ -927,27 +990,47 @@
                     hintEl.style.top = `${hintY}px`;
                 }
             } else {
-                warpSpeed += 0.06; 
+                // --- EFECTO ACELERACIÓN WARP SUAVE Y ALTAMENTE SUTIL (SIN EXAGERACIONES NI TEMBLORES) ---
+                warpSpeed += 0.035; // Aceleración suave y moderada (antes 0.065)
 
-                camera.fov = THREE.MathUtils.lerp(camera.fov, 140, 0.08);
+                // 1. Distorsión de lente sutil y progresiva (sin sacudidas en FOV)
+                camera.fov = THREE.MathUtils.lerp(camera.fov, 115, 0.04); // FOV controlado y armónico
                 camera.updateProjectionMatrix();
 
+                // 2. Desplazamiento lineal perfecto y suave de la cámara (sin sacudidas físicas en X o Y)
                 camera.position.z = Math.max(2.22, camera.position.z - warpSpeed);
+                camera.position.x = THREE.MathUtils.lerp(camera.position.x, 0, 0.1);
+                camera.position.y = THREE.MathUtils.lerp(camera.position.y, 0, 0.1);
 
+                // 3. Neblina roja suave de Marte incrementándose progresivamente
                 scene.fog.color.setHex(0x9c311a);
-                scene.fog.density = THREE.MathUtils.lerp(scene.fog.density, 1.6, 0.08);
+                scene.fog.density = THREE.MathUtils.lerp(scene.fog.density, 1.25, 0.04); 
 
-                mars.rotation.y += 0.15;
-                stormLayer.rotation.y -= 0.18;
+                // 4. Giro sutil y controlado de los astros
+                mars.rotation.y += 0.045;
+                stormLayer.rotation.y -= 0.055;
 
-                const positions = starField.geometry.attributes.position.array;
-                for (let i = 2; i < positions.length; i += 3) {
-                    positions[i] += warpSpeed * 6.0; 
-                    if (positions[i] > 80) {
-                        positions[i] = -150; 
+                // 5. Desvanecimiento suave y pausado de las estrellas fijas
+                starField.material.opacity = THREE.MathUtils.lerp(starField.material.opacity, 0.05, 0.06);
+
+                // 6. Activación e incremento de brillo sutil de las líneas vectoriales hiperespaciales
+                warpLinesMaterial.opacity = THREE.MathUtils.lerp(warpLinesMaterial.opacity, 0.55, 0.06);
+
+                // 7. Estiramiento físico muy suave de las líneas vectoriales
+                const linePositions = warpLinesField.geometry.attributes.position.array;
+                for (let i = 0; i < linePositions.length; i += 6) {
+                    linePositions[i + 2] += warpSpeed * 6.5; 
+                    linePositions[i + 5] += warpSpeed * 6.5; 
+
+                    const lineLength = warpSpeed * 12.0; 
+                    linePositions[i + 5] = linePositions[i + 2] + lineLength;
+
+                    if (linePositions[i + 2] > 20) {
+                        linePositions[i + 2] = -150;
+                        linePositions[i + 5] = -150 + lineLength;
                     }
                 }
-                starField.geometry.attributes.position.needsUpdate = true;
+                warpLinesField.geometry.attributes.position.needsUpdate = true;
             }
 
             renderer.render(scene, camera);
